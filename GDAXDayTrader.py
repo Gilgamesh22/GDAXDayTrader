@@ -1,7 +1,8 @@
-import json
-import GDAX
+#import json
 import time
 import threading
+import GDAX
+import numpy as np
 
 class MyWebsocketClient(GDAX.WebsocketClient):
     def __init__(self, url=None, products=None):
@@ -22,27 +23,51 @@ class MyWebsocketClient(GDAX.WebsocketClient):
     def onClose(self):
         print("-- Goodbye! --")
 
+def sell():
+    print("sell")
+
+def buy():
+    print("buy")
+
+
+ListOf = []
 
 WSC = MyWebsocketClient(url="wss://ws-feed.gdax.com", products=["ETH-USD"])
 WSC.start()
+
 # Do some logic with the data
 while True:
+    time.sleep(10)
     WSC.lock.acquire()
+
     #print(json.dumps(WSC.completed_transactions, sort_keys=True, indent=4))
-    for msg in WSC.completed_transactions:
-        print("Message type:", msg["type"], "\t@ %.3f" % float(msg["price"] if 'price' in msg else 0), "\t time:", msg["time"])
+    for item in WSC.completed_transactions:
+        print("Message type:", item["type"],
+        ":", item["reason"], "\t@ %.3f" % float(item["price"] if 'price' in item else 0), "\t time:", item["time"])
+
+    if len(WSC.completed_transactions) == 0:
+        WSC.lock.release()
+        continue
+
+    price = [float(item["price"]) for item in WSC.completed_transactions]
+    if len(price) == 0:
+        print("error")
+
+    meanVal = np.mean(price)
+    ListOf.append(meanVal)
+    longTermAverage = np.mean(ListOf)
+
+    for a in ListOf:
+        print(a, end=" ")
+
+    if meanVal < longTermAverage:
+        sell()
+    else:
+        buy()
+
+    if len(ListOf) >= 10:
+        del ListOf[0]
 
     WSC.completed_transactions = []
     WSC.lock.release()
-    time.sleep(5)
 WSC.close()
-
-
-
-# Set a default product
-PC = GDAX.PublicClient(api_url="https://api.gdax.com", product_id="ETH-USD")
-#print(json.dumps(PC.getProducts(), sort_keys=True, indent=4))
-#print(json.dumps(PC.getProductOrderBook(), sort_keys=True, indent=4))
-#print(json.dumps(PC.getProductTicker(), sort_keys=True, indent=4))
-#print(json.dumps(PC.getProductTrades(), sort_keys=True, indent=4))
-#print(json.dumps(PC.getProductHistoricRates(granularity=1000 , start='2017-05-04', end='2017-05-05' ), sort_keys=True, indent=4))
