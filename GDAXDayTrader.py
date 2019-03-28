@@ -1,73 +1,94 @@
-#import json
 import time
 import threading
-import GDAX
+import gdax
 import numpy as np
+import pandas as pd
+import pprint as pp
 
-class MyWebsocketClient(GDAX.WebsocketClient):
+
+class MyWebsocketClient(gdax.WebsocketClient):
     def __init__(self, url=None, products=None):
         super(MyWebsocketClient, self).__init__(url, products)
+        self.message_count = 0
         self.completed_transactions = []
         self.lock = threading.Lock()
 
-    def onOpen(self):
+    def on_open(self):
         self.completed_transactions = []
         print("Lets count the messages!")
 
-    def onMessage(self, msg):
-        if 'price' in msg and msg["type"] == "done" and msg["reason"] == "filled":
+    def on_message(self, msg):
+        if 'price' in msg and "type" in msg:
             self.lock.acquire()
             self.completed_transactions.append(msg)
             self.lock.release()
 
-    def onClose(self):
+    def on_close(self):
         print("-- Goodbye! --")
 
-def sell():
-    print("sell")
 
-def buy():
-    print("buy")
+class Wallet:
+    """ETH Wallet"""
+    def __init__(self):
+        self.usd = 10000
+        self.etc = 0
+        self.purchase_price = 0
+
+    def sell(self, val):
+        """Sell ETH"""
+        if self.etc > 0 and val > self.purchase_price:
+            self.usd = self.etc * val
+            self.etc = 0
+            print("sell: USD:", self.usd, "ETC:", self.etc, "VAL", val)
+
+    def buy(self, val):
+        """buy ETH"""
+        if self.usd > 0:
+            self.etc = self.usd / val
+            self.usd = 0
+            self.purchase_price = val
+            print("buy: USD:", self.usd, "ETC:", self.etc, "VAL", val)
 
 
 ListOf = []
+wallet = Wallet()
+transactions = []
 
 WSC = MyWebsocketClient(url="wss://ws-feed.gdax.com", products=["ETH-USD"])
 WSC.start()
 
 # Do some logic with the data
 while True:
-    time.sleep(10)
+    time.sleep(30)
     WSC.lock.acquire()
 
-    #print(json.dumps(WSC.completed_transactions, sort_keys=True, indent=4))
-    for item in WSC.completed_transactions:
-        print("Message type:", item["type"],
-        ":", item["reason"], "\t@ %.3f" % float(item["price"] if 'price' in item else 0), "\t time:", item["time"])
-
-    if len(WSC.completed_transactions) == 0:
+    if not len(WSC.completed_transactions):
         WSC.lock.release()
         continue
 
-    price = [float(item["price"]) for item in WSC.completed_transactions]
-    if len(price) == 0:
+    transactions = WSC.completed_transactions
+    WSC.completed_transactions = []
+    WSC.lock.release()
+
+    price = [float(item["price"]) for item in transactions]
+    if not price:
         print("error")
 
-    meanVal = np.mean(price)
+    # calculate rolling mean and determane whether to buy or sell
+    meanVal = pd.rolling_mean(price, 12)
     ListOf.append(meanVal)
-    longTermAverage = np.mean(ListOf)
+    longTermAverage = pd.rolling_mean(ListOf, 12)
 
     for a in ListOf:
         print(a, end=" ")
+    print("")
 
-    if meanVal < longTermAverage:
-        sell()
-    else:
-        buy()
-
-    if len(ListOf) >= 10:
+    if len(ListOf) >= 12:
+        if meanVal < longTermAverage:
+            wallet.sell(meanVal)
+        else:
+            wallet.buy(meanVal)
+        # delete oldest entry
         del ListOf[0]
 
-    WSC.completed_transactions = []
-    WSC.lock.release()
 WSC.close()
